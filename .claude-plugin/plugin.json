@@ -1,0 +1,25 @@
+{
+  "name": "sendmaxx",
+  "version": "0.1.0",
+  "description": "Skills for SendMaxx outbound sales — ICP analysis, contact discovery, campaign drafting, call briefs, post-call processing.",
+  "homepage": "https://github.com/EthiqueAI/sendmaxx-plugin",
+  "repository": "https://github.com/EthiqueAI/sendmaxx-plugin",
+  "license": "MIT",
+  "keywords": ["sales", "outbound", "sendmaxx", "claude"],
+  "skills": "./skills/",
+  "userConfig": {
+    "base_url": {
+      "type": "string",
+      "title": "SendMaxx URL",
+      "description": "Your SendMaxx app URL (e.g. https://app.sendmaxx.example or http://localhost:3000 for local dev).",
+      "required": true
+    },
+    "api_token": {
+      "type": "string",
+      "title": "API Token",
+      "description": "Your SendMaxx API token (starts with sm_). Generate from Settings → API Tokens.",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

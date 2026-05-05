@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/schemas/claude-plugin-marketplace.json",
+  "name": "sendmaxx",
+  "owner": {
+    "name": "Ethique Sendmaxx",
+    "url": "https://github.com/EthiqueAI/sendmaxx-plugin"
+  },
+  "description": "Claude Code skills for SendMaxx outbound sales.",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "sendmaxx",
+      "source": "./",
+      "description": "ICP analysis, contact discovery, campaign drafting, call briefs, and post-call processing for SendMaxx."
+    }
+  ]
+}
