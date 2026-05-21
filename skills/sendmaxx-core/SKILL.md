@@ -428,6 +428,8 @@ sendmaxx pipeline export --format csv > pipeline.csv
 
 ## ICPs
 
+**ICPs are server-first.** They live in SendMaxx's `icps` table, addressed by `slug`. There is no canonical local file — `sendmaxx icps get <slug>` is the source of truth. Any local markdown is a draft or cache, never authoritative.
+
 Available under either `icps` or `icp`.
 
 ```bash
@@ -436,13 +438,39 @@ sendmaxx icps get <slug>
 
 sendmaxx icps create --name "Vertical SaaS founders" \
   --slug vertical-saas --content-file ./icp.md
-# Auto-spawns an ICP-derived list unless --no-list.
+# Auto-spawns a contact list (type: "icp", icpSlug: <slug>, name: "ICP: <name>").
+# That list is the execution vehicle — discovery adds prospects to it, campaigns target it.
+# Add --no-list to skip (rare).
 
 sendmaxx icps update <slug> --content-file ./icp.md
-sendmaxx icps archive <slug>
+# Updates the ICP content. The auto-spawned list is preserved (same id, same memberships).
+
+sendmaxx icps archive <slug>    # soft delete; preferred
 sendmaxx icps restore <slug>
-sendmaxx icps delete <slug>     # hard delete; cascades the derived list
+sendmaxx icps delete <slug>     # hard delete; cascades to the auto-spawned list (also deleted). Use rarely — prefer archive.
 ```
+
+To re-parent or unparent an existing ICP after creation, pass `--parent-icp-id <id>` (or `--parent-icp-id ""` to unparent) to `sendmaxx icps update`.
+
+### Sub-ICPs
+
+Pass `--parent-icp-id <id>` on create to model a child segment (e.g. "Banking" under a "FinTech" parent). Each sub-ICP gets its own auto-spawned list.
+
+### Contact ↔ ICP linkage
+
+Contacts do **not** carry an `icpId`. The relationship is indirect:
+
+```
+ICP --(auto-spawned)--> list (type: "icp", icpSlug)  <--(membership)--  Contact
+```
+
+To find the list for a given ICP:
+
+```bash
+sendmaxx lists list | jq '.lists[] | select(.type == "icp" and .icpSlug == "<slug>")'
+```
+
+Fit scoring per contact is stored in the contact's `confidenceScore`, `confidenceTier`, and `confidenceReasoning` fields — there's no separate ICP-fit table.
 
 ---
 
