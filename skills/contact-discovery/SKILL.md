@@ -68,8 +68,8 @@ Most have free tiers. Apollo and Hunter are usually enough to start.
    - Whitepages for phone (only if dialing)
 4. **Cross-reference** — pick the best value per field; flag disagreement in `confidenceReasoning`
 5. **Score confidence** (0-10) based on agreement (see scoring below)
-6. **Write to SendMaxx** — `POST /api/contacts/import` with all rows in one call (it deduplicates by email)
-7. **Optionally add to a list** — `POST /api/lists/{id}/members`
+6. **Write to SendMaxx** — `sendmaxx contacts import --file rows.json --format json` (single round-trip, deduped by email). Use this even for batches of 10+; the per-row `contacts add --file` path is for already-canonical small imports.
+7. **Optionally add to a list** — `sendmaxx lists add <listId> --contacts id1,id2,...`
 
 ## Confidence scoring (0–10)
 
@@ -111,15 +111,15 @@ Always populate the `sources` JSON array with which providers contributed:
 
 When asked to re-enrich stale contacts:
 
-1. `GET /api/contacts?meta=...` or list contacts with old `enrichedAt`
-2. Run the same enrichment flow
-3. **Never overwrite non-empty fields without explicit user permission** — manual edits are sacred
-4. Only update empty/null fields, plus `enrichedAt` and `sources`
-5. Use `PATCH /api/contacts/{id}` (one at a time) for updates that need field-level control
+1. `sendmaxx stale --days 90` to surface contacts due for re-enrichment.
+2. Run the same enrichment flow.
+3. **Never overwrite non-empty fields without explicit user permission** — manual edits are sacred. `sendmaxx contacts get <id>` first to see what's already there.
+4. Only update empty/null fields, plus `enrichedAt` and `sources`.
+5. Apply per-contact updates with `sendmaxx contacts update <id> --json '{...}'`. (There's no bulk update endpoint — `contacts import` only inserts, never overwrites.)
 
 ## Deduplication
 
-`POST /api/contacts/import` handles email-based dedup automatically. Existing contacts with that email are **skipped, not overwritten**. To update existing contacts, use `PATCH /api/contacts/{id}`.
+`sendmaxx contacts import` handles email-based dedup automatically. Existing contacts with that email are **skipped, not overwritten** — the response includes `skipped` and `errors`. To update existing contacts, use `sendmaxx contacts update <id>`.
 
 ## Example
 
@@ -136,13 +136,14 @@ User says: "Find 30 founders of seed-stage SaaS companies in California."
    - Proxycurl LinkedIn → confirm title is current
    - Compute confidence
 
-3. POST /api/contacts/import { rows: [...30 contacts] }
-   → { imported: 28, skipped: 2 (duplicates), errors: [] }
+3. Write rows.json (array of contact objects with the canonical fields), then:
+   sendmaxx contacts import --file rows.json --format json
+   → { imported: 28, skipped: 2, errors: [] }
 
-4. POST /api/lists with name "CA Seed SaaS Founders"
-   → list created
+4. sendmaxx lists create --name "CA Seed SaaS Founders" --type manual
+   → captures new list ID
 
-5. POST /api/lists/{listId}/members with the imported IDs
+5. sendmaxx lists add <listId> --contacts ct_1,ct_2,...
    → all added
 ```
 
