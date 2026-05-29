@@ -9,6 +9,32 @@ You interact with SendMaxx through its CLI: the `sendmaxx` command. SendMaxx is 
 
 **Always use the CLI.** Do not call the HTTP API directly with `curl`. The CLI handles auth, base URL, pagination, and error formatting for you, and it is the supported interface.
 
+## Archive first, delete almost never
+
+SendMaxx contacts, lists, campaigns, and ICPs all support **archiving** — a reversible soft-hide. Archive is the default way to deal with anything no longer in active use. **Delete is the rare, explicit, nuclear option.**
+
+| Operation | When to use it |
+|---|---|
+| `archive` | "We're done with this for now." Default. Restorable. Hides from default views. Scheduler skips archived contacts and campaigns. Smart lists exclude archived contacts transparently. |
+| `delete` | The user has explicitly said "delete" / "wipe" / "permanently remove." Or you're cleaning up obvious test rows you just created in the same session. Cascades and cannot be undone. |
+
+**The hard rule:** if the user says "remove", "clean up", "get rid of", "tidy", "drop" — that's archive. They need to say a permanent verb ("delete", "wipe", "permanently remove", "blow away") for you to use the destructive path. Even then, on anything with downstream data (a campaign with sent emails, a contact with replies), confirm once before running it.
+
+Every destructive CLI command requires `--yes` so a typo can't trigger it.
+
+To see archived items, pass `--include-archived` (mix with active) or `--archived-only` (just archived) on any `list` / `search` command.
+
+```bash
+sendmaxx contacts archive <id>          # default cleanup verb
+sendmaxx contacts restore <id>          # undo
+sendmaxx contacts search --archived-only
+sendmaxx contacts delete <id> --yes     # nuclear; cascades
+```
+
+The same pattern is on `lists`, `campaigns`, and `icps`.
+
+---
+
 ## Setup
 
 The user authenticates once:
@@ -108,7 +134,7 @@ SendMaxx is a Next.js app backed by SQLite (Turso). It owns the schema, scheduli
 - **paused** — scheduler skips this campaign. Existing enrollments keep their progress.
 - **completed** — auto-set when every enrollment reaches a terminal status.
 
-**Launching, pausing, and managing audience are not yet in the CLI.** Create campaigns as drafts and ask the user to launch them in the SendMaxx UI.
+**Launching, pausing, resuming, and audience management ARE in the CLI** — see the Campaigns section below. Do not launch a campaign without explicit user approval; create the draft, summarize what you built, and wait for the user to say go.
 
 ### A/B testing mechanics
 
@@ -160,13 +186,14 @@ Substitution is case-insensitive. It happens at send time.
 
 ### Common mistakes to avoid
 
-- **Don't auto-launch campaigns.** The CLI doesn't expose launch; that's intentional. Create drafts; the user reviews and launches in the UI.
+- **Don't auto-launch campaigns.** `sendmaxx campaigns launch` exists, but you must not call it without explicit user approval for *this specific campaign*. Default flow: create a draft, summarize, wait. A general "go ahead and run campaigns" instruction earlier in the session does NOT pre-authorize a future launch.
 - **Don't overwrite manual edits.** When re-enriching, only update fields that are empty or that you originally populated. Manual user input is sacred.
 - **Don't set `stage` to a lower value.** The stage hierarchy is enforced server-side; downgrade attempts are silently ignored.
 - **Don't poll for new replies.** SendMaxx polls Gmail every 5 minutes. Call `sendmaxx replies sync` only if the user explicitly asks for an immediate refresh.
-- **Don't add contacts one at a time in a loop you wrote.** Use `sendmaxx contacts add --file path.json` with an array — it deduplicates by email automatically.
+- **Don't add contacts one at a time in a loop you wrote.** For pre-enriched data use `sendmaxx contacts add --file path.json` (array form). For large lists from a CSV or external source, use `sendmaxx contacts import --file ...` — it's a true bulk endpoint with one round-trip and proper dedupe.
 - **Don't fabricate data.** If you don't have a phone number, leave the field empty. Confidence scoring depends on real source agreement.
 - **Don't use `--pretty` in scripts.** It prints tables, not JSON.
+- **Don't reach for delete.** When the user wants to "remove", "clean up", "drop", "get rid of" — that's `archive`. `delete` is only when they use a permanent verb explicitly, and even then confirm on anything with downstream data. See "Archive first, delete almost never" at the top.
 
 ---
 
@@ -178,7 +205,8 @@ id, email (unique, lowercase), firstName, lastName, company, title,
 phone, state, county, notes,
 stage, confidenceScore (0-10), confidenceTier (low|medium|high),
 confidenceReasoning, sources (JSON array of source names),
-enrichedAt, createdBy, createdAt, updatedAt
+enrichedAt, archivedAt (null = active, unix ms = archived),
+createdBy, createdAt, updatedAt
 ```
 
 ### Campaign
@@ -186,6 +214,7 @@ enrichedAt, createdBy, createdAt, updatedAt
 id, name, status (draft|active|paused|completed),
 abTestEnabled (0|1), totalSent, totalOpened, totalReplied,
 totalMeeting, totalBounced, totalClicked,
+archivedAt (null = active, unix ms = archived; orthogonal to status),
 createdBy, createdAt, updatedAt
 ```
 
@@ -212,12 +241,16 @@ receivedAt
 ```
 id, name, description, type (manual|smart|tagged|icp),
 query? (smart), tag? (tagged), icpSlug? (icp),
-memberCount, source, createdAt
+memberCount, source,
+archivedAt (null = active, unix ms = archived),
+createdAt
 ```
 
 ### ICP
 ```
-slug, name, description, content (markdown), status (active|archived), parentIcpId?
+slug, name, description, content (markdown),
+status (active|archived), archivedAt (canonical archive marker; mirrors status),
+parentIcpId?
 ```
 
 ---
@@ -244,19 +277,55 @@ sendmaxx contacts get <id>
 
 Returns the contact plus interaction history.
 
-### Add
+### Add (one contact, or small enriched batch)
 
 Single contact:
 ```bash
 sendmaxx contacts add --json '{"email":"x@y.com","firstName":"Ada","company":"Acme"}'
 ```
 
-Bulk from a file (object or array):
+Small batch from a JSON file (object or array):
 ```bash
 sendmaxx contacts add --file ./enriched.json
 ```
 
-The file can be a single contact or an array. Array form loops one-by-one and reports `{ added, failed }` totals. `email` is required; duplicates are skipped.
+The file can be a single object or an array. Array form loops one-by-one and reports `{ added, failed }` totals. `email` is required; duplicates are skipped.
+
+**Use `contacts add` only when the data is already in SendMaxx's canonical shape.** For raw CSVs or large datasets, use `contacts import` (next).
+
+### Import (CSV or JSON, bulk)
+
+```bash
+sendmaxx contacts import --file leads.csv
+sendmaxx contacts import --file leads.csv --dry-run                           # parse & preview, no upload
+sendmaxx contacts import --file leads.csv --mapping '{"Lead Email":"email","Org":"company"}'
+sendmaxx contacts import --file leads.json --format json
+```
+
+Single round-trip, deduped by email server-side. Returns `{ imported, skipped, errors }`.
+
+**Allowed fields (everything else is ignored):**
+
+| Field | Required | Notes |
+|---|---|---|
+| `email` | yes | Lowercased server-side. Rows without a valid email are dropped. |
+| `firstName` | | |
+| `lastName` | | |
+| `company` | | |
+| `title` | | |
+| `phone` | | |
+| `state` | | US 2-letter code is conventional but not enforced. |
+| `county` | | |
+| `notes` | | Free text. |
+
+**CSV format:**
+- First row is the header. Cells may be quoted; embedded commas and `""`-escaped quotes are handled.
+- Common header variants are auto-mapped: `Email Address`, `email_address`, `E-mail` → `email`; `First Name`, `first_name`, `Given Name` → `firstName`; `Job Title`, `Role`, `Position` → `title`; `Organization`, `Company Name`, `Org` → `company`; `Phone Number`, `Mobile`, `Tel` → `phone`; etc.
+- If a column doesn't auto-map, pass `--mapping '{"<exact header text>":"<canonical field>"}'`. The canonical field must be one of the nine fields above.
+
+**JSON format:** either a top-level array `[{...}, {...}]` or `{"rows":[{...}, {...}]}`. Use the canonical field names directly.
+
+**Always run `--dry-run` first on data you didn't generate.** It returns `{ parsed, importable, droppedNoEmail, preview }` so you can confirm the mapping is right before the real upload.
 
 ### Update
 
@@ -274,13 +343,40 @@ sendmaxx contacts update-stage <id> --stage meeting_booked
 
 Server enforces escalation-only.
 
-### Delete
+### Archive / restore (preferred)
 
 ```bash
-sendmaxx contacts delete <id>
+sendmaxx contacts archive <id>
+sendmaxx contacts restore <id>
+sendmaxx contacts search --archived-only
+sendmaxx contacts search --include-archived           # active + archived
 ```
 
-Cascades to campaign enrollments.
+Archived contacts:
+- Hidden from `contacts search` and from the contact pickers in the UI.
+- **Excluded automatically from smart/tagged/ICP list resolution** — so any campaign launching from those lists won't enroll them.
+- **Skipped by the scheduler** — even existing enrollments stop receiving sends until the contact is restored.
+- Still appear on `contacts get <id>` directly (so you can inspect / restore them).
+- Replies and call history are untouched.
+
+Use this as your default cleanup mechanism. The contact's data, history, and confidence score all survive.
+
+### Delete (rare, destructive)
+
+```bash
+sendmaxx contacts delete <id> --yes
+```
+
+Hard-deletes the contact, cascades to campaign enrollments, sent emails, click events, replies. **Cannot be undone.** Only use when the user has explicitly asked for permanent deletion. If you're unsure, archive instead and tell the user "I archived it; if you want it permanently gone, ask me to delete it."
+
+### Bulk delete
+
+```bash
+sendmaxx contacts bulk-delete --ids id1,id2,id3 --yes
+sendmaxx contacts bulk-delete --file ids.txt --yes      # one ID per line
+```
+
+One round-trip. `--yes` is required (the server cascade is permanent — deletes the contact, all enrollments, sent emails, clicks, replies, and bounce records for those contacts). Returns `{ deleted: <n> }`.
 
 ### Tag / untag
 
@@ -340,6 +436,28 @@ sendmaxx lists convert-to-manual <id>
 
 Materializes current members and turns the list into a `manual` snapshot.
 
+### Archive / restore (preferred for cleanup)
+
+```bash
+sendmaxx lists archive <id>
+sendmaxx lists restore <id>
+sendmaxx lists list --archived-only
+sendmaxx lists list --include-archived
+```
+
+Archived lists:
+- Hidden from `lists list` by default.
+- **Campaigns that snapshotted from this list are unaffected** — the audience is frozen at add-time, so archiving the source list doesn't disenroll anyone.
+- Smart/tagged/ICP lists can be archived too; the underlying query is preserved for when you restore.
+
+### Delete (rare)
+
+```bash
+sendmaxx lists delete <id> --yes
+```
+
+Hard-delete. Cascades to list memberships. Prefer archive.
+
 ---
 
 ## Campaigns
@@ -355,17 +473,18 @@ sendmaxx campaigns get <id>
 
 ```bash
 sendmaxx campaigns create --name "Q2 Founders Outreach" --steps-file ./steps.json
+sendmaxx campaigns create --name "Q2 A/B test" --steps-file ./steps.json --ab-test
 ```
 
-`steps.json` shape:
+### Step schema (`steps.json`)
 
 ```json
 [
   {
-    "subjectA": "Quick question about {{company}}",
-    "subjectB": "{{first_name}}, 30 seconds?",
-    "bodyHtml": "<p>Hey {{first_name}}, ...</p>",
-    "bodyText": "Hey {{first_name}}, ...",
+    "subjectA": "Quick question about your outbound stack",
+    "subjectB": "30 seconds?",
+    "bodyHtml": "<p>Hey {{first_name}}, saw {{company}} is hiring SDRs — ...</p>",
+    "bodyText": "Hey {{first_name}}, saw {{company}} is hiring SDRs — ...",
     "delayDays": 0
   },
   {
@@ -376,9 +495,83 @@ sendmaxx campaigns create --name "Q2 Founders Outreach" --steps-file ./steps.jso
 ]
 ```
 
-- Step 0 fires immediately on launch; later steps wait `delayDays` after the previous send.
-- `bodyHtml` is rendered through markdown.
-- Set `abTestEnabled` and audience via the SendMaxx UI for now (CLI doesn't expose those).
+Field-by-field:
+
+| Field | Required | Behavior |
+|---|---|---|
+| `subjectA` | yes | Subject line. **No merge fields** — subjects are sent literally. Personalize the body, not the subject. |
+| `subjectB` | no | A/B variant subject (only used when the campaign has `abTestEnabled: true`). |
+| `bodyHtml` | yes | Markdown allowed — it's rendered through `marked()` at send time. Merge fields below are substituted before render. |
+| `bodyText` | no | Plain-text alternative. Same merge-field rules. |
+| `delayDays` | no, default `0` | Days to wait after the *previous* step before sending this one. Step 0 fires immediately on launch. |
+
+**Merge fields (case-insensitive, BODY ONLY):**
+
+| Token | Resolves to | Fallback |
+|---|---|---|
+| `{{first_name}}` | `contact.firstName` | `there` |
+| `{{last_name}}` | `contact.lastName` | empty |
+| `{{name}}` | first + last | first only |
+| `{{company}}` | `contact.company` | `your company` |
+| `{{title}}` | `contact.title` | empty |
+
+If you write a merge field in a subject, it'll be sent as-is (e.g. `Hi {{first_name}}` in the inbox). Don't do that.
+
+### Update (edit a draft)
+
+```bash
+sendmaxx campaigns update <id> --name "Q2 Founders v2"
+sendmaxx campaigns update <id> --steps-file ./steps-v2.json     # REPLACES all steps
+sendmaxx campaigns update <id> --ab-test
+sendmaxx campaigns update <id> --no-ab-test
+```
+
+Sending `--steps-file` replaces the entire step list (it's not a patch — server deletes existing steps and re-inserts). Safe on drafts; on an `active` campaign this changes what future sends use, but already-sent emails are unaffected.
+
+### Audience
+
+A campaign's audience is the set of `campaign_contacts` enrollments. Contacts can be added by individual ID or via a list snapshot (smart/tagged/icp lists are resolved at the time of add — the snapshot is frozen).
+
+```bash
+sendmaxx campaigns audience show <id>                                    # current audience + source-list summary
+sendmaxx campaigns audience add <id> --contacts ct_1,ct_2,ct_3
+sendmaxx campaigns audience add <id> --list lst_abc                       # snapshot current list members
+sendmaxx campaigns audience add <id> --contacts ct_4 --list lst_xyz       # both in one call
+sendmaxx campaigns audience remove <id> --cc-ids cc_1,cc_2                # by campaignContact ID (from `audience show`)
+sendmaxx campaigns audience remove <id> --list lst_abc                    # remove everything sourced from this list
+```
+
+Notes:
+- `audience add` returns `{ added: <n> }`. Duplicates (same contact + same campaign) are silently no-op'd.
+- `audience remove` operates on **campaignContact IDs**, not contact IDs. Get them from `audience show`.
+- Removing the source list (e.g. `lists delete lst_abc`) does NOT remove enrollments — the audience is a snapshot.
+
+### Launch, pause, resume
+
+```bash
+sendmaxx campaigns launch <id>                                            # uses existing audience
+sendmaxx campaigns launch <id> --contacts ct_a,ct_b,ct_c                  # also enroll these at launch
+sendmaxx campaigns pause  <id>
+sendmaxx campaigns resume <id>
+```
+
+Launch requires at least one step and a non-empty audience — the server will 400 otherwise. Returns `{ ok: true, enrolled: <n> }`.
+
+**Authorization rule:** the user must explicitly approve launching *this campaign*. A blanket "go" from earlier in the conversation does not extend to a new campaign. Show the user the campaign summary (name, audience size, step count, first send time) and wait.
+
+### Recipients (read-only engagement)
+
+```bash
+sendmaxx campaigns recipients <id>
+```
+
+Returns a per-recipient row with `emailsSent`, `opens`, `firstOpenAt`, `clicks`, `clickDetails`, `replied`, `openHistory`, etc. Use this for triage — "who opened but didn't reply?" — not for audience management.
+
+```bash
+sendmaxx campaigns recipient-stage <campaignContactId> --stage <label>
+```
+
+Updates a single enrollment's free-form `stage` label (independent of the contact's overall `stage`).
 
 ### Performance
 
@@ -386,7 +579,31 @@ sendmaxx campaigns create --name "Q2 Founders Outreach" --steps-file ./steps.jso
 sendmaxx campaigns performance <id>
 ```
 
-Returns per-step and per-variant analytics.
+Returns per-step and per-variant analytics aggregated across the whole campaign.
+
+### Archive / restore (preferred for cleanup)
+
+```bash
+sendmaxx campaigns archive <id>           # auto-pauses if active
+sendmaxx campaigns restore <id>           # stays paused; use `resume` to start sending again
+sendmaxx campaigns list --archived-only
+sendmaxx campaigns list --include-archived
+```
+
+Archived campaigns:
+- Auto-paused on archive if `status='active'` (response includes `autoPaused: true`).
+- **Scheduler skips them** — no future sends.
+- Hidden from `campaigns list` by default.
+- All analytics, sent emails, click events, and replies are preserved.
+- Restore leaves status at `paused` — call `sendmaxx campaigns resume <id>` to actually resume sending.
+
+### Delete (rare, destructive)
+
+```bash
+sendmaxx campaigns delete <id> --yes
+```
+
+Cascades: deletes the campaign, its steps, all enrollments, sent emails, click events, replies tied to those emails. **Cannot be undone.** Prefer `archive` 99% of the time — archived campaigns retain their full analytics history, which deleted ones don't.
 
 ---
 
@@ -434,6 +651,8 @@ Available under either `icps` or `icp`.
 
 ```bash
 sendmaxx icps list
+sendmaxx icps list --archived-only
+sendmaxx icps list --include-archived
 sendmaxx icps get <slug>
 
 sendmaxx icps create --name "Vertical SaaS founders" \
@@ -445,10 +664,19 @@ sendmaxx icps create --name "Vertical SaaS founders" \
 sendmaxx icps update <slug> --content-file ./icp.md
 # Updates the ICP content. The auto-spawned list is preserved (same id, same memberships).
 
-sendmaxx icps archive <slug>    # soft delete; preferred
-sendmaxx icps restore <slug>
-sendmaxx icps delete <slug>     # hard delete; cascades to the auto-spawned list (also deleted). Use rarely — prefer archive.
+# Archive / restore (preferred for cleanup)
+sendmaxx icps archive <slug>                 # cascade-archives the linked list too
+sendmaxx icps archive <slug> --keep-list     # archive the ICP but leave the list active
+sendmaxx icps restore <slug>                 # restores the ICP AND the linked list (if it was archived alongside)
+
+# Hard-delete (rare; cascades to the auto-spawned list which is also hard-deleted)
+sendmaxx icps delete <slug> --yes
 ```
+
+**ICP archive cascade rules:**
+- Default: archiving an ICP also archives its auto-spawned `type=icp` list. This keeps the "ICP is dormant → so is its execution vehicle" semantics intact.
+- `--keep-list`: archives only the ICP. Use this when the user wants to retire the ICP doc but keep working with the underlying audience (rare — usually if you do this you should convert the list to `manual` first so it doesn't try to resolve against an archived ICP).
+- Restore: symmetric. Restoring an ICP also un-archives its linked list if the list was archived. (Edge case: if the user separately re-archived the list while the ICP was archived, restoring the ICP un-archives the list anyway. Rare enough to ignore.)
 
 To re-parent or unparent an existing ICP after creation, pass `--parent-icp-id <id>` (or `--parent-icp-id ""` to unparent) to `sendmaxx icps update`.
 
@@ -502,11 +730,21 @@ sendmaxx stale --days 90             # contacts needing re-enrichment
 3. Write to a JSON file, then `sendmaxx contacts add --file enriched.json`. Duplicates are skipped by email.
 4. Optionally `sendmaxx lists add <listId> --contacts ...` to organize them, or tag them with `sendmaxx contacts tag`.
 
-### Create a campaign for review
+### Bulk import a CSV the user gave you
 
-1. Draft subject + markdown body for each step, save as `steps.json`.
-2. `sendmaxx campaigns create --name "..." --steps-file steps.json` — this is a draft.
-3. Tell the user to review and launch in the SendMaxx UI.
+1. Eyeball the file — note the header row, look for non-obvious columns.
+2. `sendmaxx contacts import --file file.csv --dry-run`. Read the returned `preview`; confirm every column you care about made it into the canonical fields. If `droppedNoEmail` is high, something's off — maybe the email column has an unrecognized header. Use `--mapping '{"<header>":"email"}'`.
+3. Once `--dry-run` looks right, drop the flag and run for real.
+4. If you want the new contacts in a list, follow up with `sendmaxx lists add` (manual list) or rely on a tag-based / smart list that already matches them.
+
+### Create a campaign end-to-end
+
+1. Draft subject + markdown body for each step, save as `steps.json` (see schema above).
+2. `sendmaxx campaigns create --name "..." --steps-file steps.json` — captures the campaign ID from the response.
+3. Add audience: `sendmaxx campaigns audience add <id> --list <listId>` (snapshot) or `--contacts <ids>` (direct).
+4. `sendmaxx campaigns audience show <id>` and `sendmaxx campaigns get <id> --pretty` — show the user what's about to go out.
+5. **Wait for explicit approval.** When the user says go, `sendmaxx campaigns launch <id>`.
+6. Watch progress: `sendmaxx campaigns performance <id>` or `sendmaxx campaigns recipients <id>`. Pause with `sendmaxx campaigns pause <id>` if something looks wrong.
 
 ### Process replied contacts
 
@@ -514,6 +752,15 @@ sendmaxx stale --days 90             # contacts needing re-enrichment
 2. For each, read `fullBody` and pick the right tag.
 3. `sendmaxx replies tag <id> --tag <tag>`.
 4. Optionally draft a follow-up using the Outreach Drafting skill.
+
+### Tidy up — archive everything stale, don't delete
+
+When the user says "clean up that list", "get rid of these contacts", "remove this campaign", or any soft-cleanup phrase:
+
+1. **Archive, don't delete.** `sendmaxx <entity> archive <id>` for each.
+2. Confirm in plain language: "Archived 12 contacts and the 'Q1 SDR push' campaign. Nothing was deleted — say `restore` (or 'undo') if you change your mind."
+3. If the user comes back asking "where did X go" — `sendmaxx <entity> list --archived-only` to find it, then `restore`.
+4. Only escalate to `delete --yes` if the user uses a permanent verb explicitly. Even then, on anything with downstream data (campaign with sent emails, contact with replies), confirm once: "This permanently wipes 47 sent emails and 3 replies tied to that campaign. Proceed?"
 
 ### Re-enrich stale contacts
 
@@ -525,6 +772,6 @@ sendmaxx stale --days 90             # contacts needing re-enrichment
 
 ## When the CLI isn't enough
 
-A few capabilities aren't in the CLI yet: launching/pausing campaigns, managing campaign audience after creation, dialer/calls, workspace settings, and the dashboard view. For those, direct the user to the SendMaxx UI rather than falling back to raw HTTP.
+A few capabilities aren't in the CLI yet: dialer/calls, workspace settings, API-token management, and the dashboard view. For those, direct the user to the SendMaxx UI rather than falling back to raw HTTP.
 
 If you hit a command-not-found or `Unknown command` error from `sendmaxx`, the user's CLI may be out of date. Suggest they upgrade their install of `@ethiqueai/cli`.
