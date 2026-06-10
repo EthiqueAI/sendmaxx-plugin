@@ -774,4 +774,4 @@ When the user says "clean up that list", "get rid of these contacts", "remove th
 
 A few capabilities aren't in the CLI yet: dialer/calls, workspace settings, API-token management, and the dashboard view. For those, direct the user to the SendMaxx UI rather than falling back to raw HTTP.
 
-If you hit a command-not-found or `Unknown command` error from `sendmaxx`, the user's CLI may be out of date. Suggest they upgrade their install of `@ethiqueai/cli`.
+If you hit a command-not-found or `Unknown command` error from `sendmaxx`, the user's CLI may be out of date. Suggest they upgrade their install of `@ethiqueai/sendmaxx-cli`.
