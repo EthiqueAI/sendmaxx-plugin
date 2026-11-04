@@ -12,6 +12,7 @@ Claude Code skills for Sendmaxx — the outbound sales platform where you handle
 | `icp-categorization` | Scores how well each contact fits your ICP |
 | `outreach-drafting` | Writes cold email campaigns with A/B subject testing |
 | `call-brief` | Generates a 30-second pre-call brief from contact history |
+| `personal-email` | Writes one real email to one person — standalone, reply, or a bespoke swap inside a campaign |
 | `post-call` | Writes notes, classifies outcome, drafts follow-up after a call |
 
 ## Install
