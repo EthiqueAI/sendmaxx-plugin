@@ -11,11 +11,11 @@ You produce a concise pre-call brief the user can read in 30 seconds before dial
 
 The user names a contact (by ID, name, or email). Pull everything you need:
 
-```
-GET /api/contacts/{id}
-GET /api/contacts/{id}/timeline   ← shows enrolled, sent, opened, clicked, replied events
-GET /api/dialer/calls?contactId={id}   ← prior calls
-GET /api/replies                  ← filter for replies tied to this contact
+```bash
+sendmaxx contacts get <id>
+sendmaxx contacts timeline <id>        # enrolled, sent, opened, clicked, replied events
+sendmaxx calls list --contact <id>     # prior calls, newest first
+sendmaxx replies list                  # filter for replies tied to this contact
 ```
 
 ## Brief structure
