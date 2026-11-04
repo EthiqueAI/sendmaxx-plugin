@@ -37,17 +37,17 @@ The same pattern is on `lists`, `campaigns`, and `icps`.
 
 ## Setup
 
-The user authenticates once:
+The user authenticates once, **in their own terminal**:
 
 ```bash
-sendmaxx auth login --token sm_xxx --url https://app.sendmaxx.example
+sendmaxx auth login
 ```
 
-This writes `~/.sendmaxx/config.json`. After that, every command picks up the token automatically.
+It prompts for their SendMaxx URL and an API token (created in SendMaxx Settings, input hidden), validates it, and writes `~/.sendmaxx/config.json`. After that, every command picks up the token automatically.
 
-To check status: `sendmaxx auth status`. To override per-invocation: `sendmaxx --token sm_xxx --url https://... <command>`.
+To check status: `sendmaxx auth status`.
 
-If a command fails with "Not authenticated", tell the user to run `sendmaxx auth login` — don't try to read tokens from env vars or config files yourself.
+The token must never pass through the conversation. Don't ask the user to paste it into chat, and don't put one in a command yourself. If a command fails with "Not authenticated", or `auth login` says it has no interactive terminal, ask the user to run the command above in their own terminal, then continue once `sendmaxx auth status` shows `"authenticated": true`. Don't try to read tokens from env vars or config files yourself.
 
 ## Output conventions
 
