@@ -11,10 +11,10 @@ After a sales call, you log what happened and prepare the next step. Use SendMax
 
 The user usually says "process my last call" or names a contact. Pull:
 
-```
-GET /api/dialer/calls?contactId={id}      ← most recent call(s)
-GET /api/contacts/{id}                    ← contact context
-GET /api/contacts/{id}/timeline           ← interaction history
+```bash
+sendmaxx calls list --contact <id>     # most recent call(s), newest first
+sendmaxx contacts get <id>             # contact context
+sendmaxx contacts timeline <id>        # interaction history
 ```
 
 If there's a transcript provided (paste, file, or future Telnyx integration), summarize from that. Otherwise, ask the user for a quick verbal summary.
@@ -25,16 +25,12 @@ Three things:
 
 ### 1. CRM note (concise summary)
 
-```
-GET /api/dialer/calls?contactId={id} → find the call ID
-POST /api/dialer/calls
-{
-  "id": "<existing-call-id-if-updating>",
-  "notes": "Initial discovery. They're 6 months into manual SOC 2 prep, frustrated with auditor delays. Budget owner is the COO (not on call). Next step: send case study, schedule follow-up with COO in 2 weeks."
-}
+```bash
+sendmaxx calls list --contact <id>     # find the call ID (first row is the latest)
+sendmaxx calls update <call-id> --notes "Initial discovery. They're 6 months into manual SOC 2 prep, frustrated with auditor delays. Budget owner is the COO (not on call). Next step: send case study, schedule follow-up with COO in 2 weeks."
 ```
 
-Note: Currently the API only supports POST for new calls. If updating an existing call entry, document this as a limitation and the user can edit in the UI.
+`calls update` only works on calls the user placed, and `--notes` replaces any existing notes. If there's no call record (e.g. the call was made from a phone outside the dialer), create one instead with `sendmaxx calls log --contact <id> --notes "..." --outcome <outcome>`.
 
 Keep notes under 60 words. Three things matter:
 - **Pain confirmed/discovered** — what's actually broken for them
@@ -51,13 +47,13 @@ Pick exactly one:
 - `no_answer` — didn't reach them
 
 Set this on the call:
-```
-POST /api/dialer/calls { "id": ..., "outcome": "meeting_booked", ... }
+```bash
+sendmaxx calls update <call-id> --outcome meeting_booked
 ```
 
 If outcome is `meeting_booked`, also update the contact stage:
-```
-PATCH /api/contacts/{id} { "stage": "meeting_booked" }
+```bash
+sendmaxx contacts update-stage <id> --stage meeting_booked
 ```
 
 ### 3. Follow-up email draft
@@ -69,7 +65,16 @@ Use the Outreach Drafting skill's principles. The email should:
 - Attach or reference any resource you promised them
 - Be under 80 words
 
-Don't auto-send. Save as a draft or output the markdown for the user to send manually. The current API doesn't have a draft-email endpoint — output the subject and body for the user to copy or paste, and note this as future work.
+Don't auto-send. Save it as a draft with the Personal Email skill, then show the user and wait:
+
+```bash
+sendmaxx emails draft --contact <id> --subject "..." --content "$(cat <<'EOF'
+...
+EOF
+)" --why "what they said on the call that this follows up on"
+```
+
+If the call came out of an existing email thread, use `sendmaxx emails reply --thread <gmailThreadId>` instead so the follow-up lands in the conversation. Send only on an explicit go: `sendmaxx emails send <id> --yes`.
 
 ## Output format
 
@@ -84,15 +89,13 @@ Follow-up draft:
 
 Subject: Tue 2pm — quick agenda for our demo
 
-Hey {first_name},
+Hey Sarah,
 
 Looking forward to Tuesday. I'll bring:
 - The {SimilarCompany} case study you asked about
 - A 5-min walkthrough of our auditor portal
 
 If your COO can join — even for the last 10 min — that's where the budget conversation makes sense. Otherwise I'll follow up with a written summary.
-
-— {your name}
 ```
 
 ## Don't

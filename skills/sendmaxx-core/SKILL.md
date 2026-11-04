@@ -193,6 +193,8 @@ Substitution is case-insensitive. It happens at send time.
 - **Don't add contacts one at a time in a loop you wrote.** For pre-enriched data use `sendmaxx contacts add --file path.json` (array form). For large lists from a CSV or external source, use `sendmaxx contacts import --file ...` — it's a true bulk endpoint with one round-trip and proper dedupe.
 - **Don't fabricate data.** If you don't have a phone number, leave the field empty. Confidence scoring depends on real source agreement.
 - **Don't use `--pretty` in scripts.** It prints tables, not JSON.
+- **Don't send personal emails without per-email approval.** Same rule as campaign launches: `sendmaxx emails send <id> --yes` goes to a named human. Show the draft, wait, then send.
+- **Don't use campaign overrides at scale.** More than about five recipients each needing custom text means it's a different campaign, not a pile of overrides — and you'll hit the 30 req/min token rate limit partway through and leave a half-built set.
 - **Don't reach for delete.** When the user wants to "remove", "clean up", "drop", "get rid of" — that's `archive`. `delete` is only when they use a permanent verb explicitly, and even then confirm on anything with downstream data. See "Archive first, delete almost never" at the top.
 
 ---
@@ -253,6 +255,21 @@ status (active|archived), archivedAt (canonical archive marker; mirrors status),
 parentIcpId?
 ```
 
+### PersonalEmail
+An individually-written email to one person — not a template. See the Personal Email skill.
+```
+id ("pe_" prefixed), kind (standalone|reply|campaign_override),
+status (draft|approved|sending|sent|canceled|failed),
+contactId, subject?, body (markdown),
+gmailThreadId?, inReplyToMessageId?          -- kind=reply
+campaignContactId?, stepIndex?               -- kind=campaign_override
+scheduledAt?, trackingEnabled (0|1),
+personalizationNotes?, sources?, authorSource (user|claude),
+sentEmailId?, failureReason?,
+archivedAt (null = active), createdAt, updatedAt
+```
+`subject` is null only on a `campaign_override`, where it inherits the step's subject.
+
 ---
 
 ## Contacts
@@ -276,6 +293,14 @@ sendmaxx contacts get <id>
 ```
 
 Returns the contact plus interaction history.
+
+### Timeline
+
+```bash
+sendmaxx contacts timeline <id>
+```
+
+Every interaction, oldest first: campaign enrolments, sends, opens, clicks, replies. Returns `{ contact, events: [{ type, timestamp, label, meta }] }`. Calls aren't in the timeline — use `sendmaxx calls list --contact <id>`.
 
 ### Add (one contact, or small enriched batch)
 
@@ -633,6 +658,48 @@ Only when the user explicitly wants the latest replies right now — the backgro
 
 ---
 
+## Personal emails
+
+Individually-written emails to one person. Three kinds share one resource. Full
+guidance lives in the Personal Email skill; this is the command reference.
+
+```bash
+sendmaxx emails list [--status draft] [--kind reply] [--contact <id>]
+sendmaxx emails get <id>              # --pretty renders the body and the "why"
+
+# A standalone one-off. Write the real words — merge fields are a tell here.
+sendmaxx emails draft --contact <id> --subject "..." --content "$(cat <<'EOF'
+Hey Sarah, ...
+EOF
+)" --why "why this email says what it says"
+
+# A reply into a live thread. Subject and threading headers come from the thread.
+sendmaxx emails reply --contact <id> --thread <gmailThreadId> --content "..."
+
+# Replace a campaign step's body for ONE recipient. ccIds come from
+# `sendmaxx campaigns recipients <campaignId>`.
+sendmaxx emails override --campaign-contact <ccId> --step 0 --content "..."
+
+sendmaxx emails update <id> --content "..."   # editing an approved email returns it to draft
+sendmaxx emails send <id> --yes [--now]       # --yes is required
+sendmaxx emails cancel <id>
+sendmaxx emails archive <id> / restore <id> / delete <id> --yes
+```
+
+Also registered as `sendmaxx email` (singular).
+
+`send` without `--now` approves the email and lets the scheduler deliver it on its
+next tick, inheriting the send window, daily cap and throttle. `--now` bypasses only
+the send-hour window.
+
+A `campaign_override` is delivered by the campaign itself, at the step you targeted —
+`send` just approves it. An override still in `draft` when its step comes due is
+skipped: the template sends and the override is marked `canceled`. Note also that
+re-launching an active campaign resets `nextSendAt` for the *whole* audience, so an
+override on a later step can fire earlier than you'd expect.
+
+---
+
 ## Pipeline
 
 ```bash
@@ -712,6 +779,24 @@ Returns each tag with total count and per-source breakdown (`claude` vs `user`).
 
 ---
 
+## Calls
+
+Calls placed through the in-app dialer are logged automatically. Use these to read call history and record outcomes.
+
+```bash
+sendmaxx calls list [--contact <id>] [--outcome <outcome>] [--limit <n>]
+sendmaxx calls update <call-id> [--outcome <outcome>] [--notes "..."] [--status <status>] [--duration <seconds>]
+sendmaxx calls log --contact <id> [--outcome <outcome>] [--notes "..."] [--duration <seconds>] [--started-at <iso>] [--phone <n>] [--caller <n>]
+```
+
+- Without `--contact`, `list` returns the calls you placed, newest first.
+- `update` only works on calls you placed. `--notes` replaces the existing notes.
+- `log` is for calls with no record yet, e.g. made from a phone outside the dialer. `--phone` defaults to the contact's phone and `--caller` to the user's caller number in Settings → Dialer. Always `calls list --contact <id>` first so you don't log a duplicate.
+- Outcomes: `no_answer`, `not_interested`, `callback`, `meeting_booked`. Statuses: `initiated`, `ringing`, `active`, `completed`, `failed`, `no_answer`.
+- Setting an outcome does **not** change the contact's stage. For `meeting_booked`, also run `sendmaxx contacts update-stage <id> --stage meeting_booked`.
+
+---
+
 ## Alerts
 
 ```bash
@@ -772,6 +857,6 @@ When the user says "clean up that list", "get rid of these contacts", "remove th
 
 ## When the CLI isn't enough
 
-A few capabilities aren't in the CLI yet: dialer/calls, workspace settings, API-token management, and the dashboard view. For those, direct the user to the SendMaxx UI rather than falling back to raw HTTP.
+A few capabilities aren't in the CLI yet: placing calls (the dialer is browser-only), workspace settings, API-token management, and the dashboard view. For those, direct the user to the SendMaxx UI rather than falling back to raw HTTP.
 
 If you hit a command-not-found or `Unknown command` error from `sendmaxx`, the user's CLI may be out of date. Suggest they upgrade their install of `@ethiqueai/sendmaxx-cli`.
