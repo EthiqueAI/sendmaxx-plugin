@@ -111,12 +111,16 @@ SendMaxx is a Next.js app backed by SQLite (Turso). It owns the schema, scheduli
 
 ### Authentication & data access
 
-- One API token = one user. Tokens scope you to that user's data.
-- `data_visibility` is a global workspace setting:
-  - `org` (default): all users in the workspace see all contacts/campaigns.
-  - `user`: each user only sees what they created.
-- The shape of list responses includes an `orgMode: boolean` field if you need to detect the active mode.
-- Mutations check ownership regardless of visibility — you can only modify what your token's user created. A "forbidden" error means respect it; don't retry.
+- One API token = one user. What that user can see depends on the workspace-wide `data_visibility` setting. It's a switch on the web app's Settings page and affects every user, so never change it yourself.
+  - **Org mode** (default): every user sees, and can act on, the whole workspace's contacts, campaigns, ICPs, lists, replies and tags. Records carry `createdBy`, so you can say whose they are.
+  - **User mode**: each user sees and acts on only what they created.
+- Check the mode with `sendmaxx auth status`: it reports `"orgMode": true | false`. Contact, campaign and list responses carry the same `orgMode` field.
+- Some things ignore the mode:
+  - `sendmaxx campaigns launch` is creator-only, because the campaign sends from the creator's Gmail. In org mode you can view, edit, pause or archive a teammate's campaign, but only they can launch it.
+  - Personal emails (`sendmaxx emails …`) and your own call log (`sendmaxx calls list` with no `--contact`) are always private to you.
+- In org mode, `sendmaxx replies list` covers the whole workspace. When triaging, tag the replies the user asked about, not every teammate's.
+- `~/.sendmaxx/icps` mirrors whatever ICPs you can see. In org mode that includes teammates' ICPs, and syncing an edit pushes it to their ICP. If the workspace switches to user mode, the next sync removes teammates' ICPs locally with the note "no longer visible to you". Nothing is deleted on the server.
+- A 403 "Forbidden" means the record isn't yours to touch under the current mode. Respect it and don't retry.
 - CLI requests are rate-limited to **30/minute**. Slow down on 429.
 
 ### The campaign lifecycle
@@ -712,7 +716,13 @@ sendmaxx pipeline export --format csv > pipeline.csv
 
 ## ICPs
 
-**ICPs are server-first.** They live in SendMaxx's `icps` table, addressed by `slug`. There is no canonical local file — `sendmaxx icps get <slug>` is the source of truth. Any local markdown is a draft or cache, never authoritative.
+**ICPs live on the server and are mirrored locally.** They're stored in SendMaxx's `icps` table, addressed by `slug`. The CLI keeps a copy of each active ICP's markdown at `~/.sendmaxx/icps/<slug>.md`, and every `sendmaxx icps` command syncs it in both directions:
+
+- Server changes are pulled into the file.
+- Edits made to the file are pushed to the server.
+- Copies of archived or deleted ICPs are removed.
+
+To change an ICP's content, you can edit `~/.sendmaxx/icps/<slug>.md` directly and then run `sendmaxx icps sync <slug>`, or use `sendmaxx icps update`. If both sides changed since the last sync, the CLI reports a **conflict** and overwrites nothing; the server version is saved alongside as `<slug>.server.md`. Show the user both versions, then resolve with `sendmaxx icps sync <slug> --prefer local|server`. Never resolve a conflict without asking.
 
 Available under either `icps` or `icp`.
 
@@ -721,6 +731,7 @@ sendmaxx icps list
 sendmaxx icps list --archived-only
 sendmaxx icps list --include-archived
 sendmaxx icps get <slug>
+sendmaxx icps sync [slug] [--prefer local|server]   # explicit two-way sync of ~/.sendmaxx/icps/
 
 sendmaxx icps create --name "Vertical SaaS founders" \
   --slug vertical-saas --content-file ./icp.md
