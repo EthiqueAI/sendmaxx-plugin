@@ -15,7 +15,7 @@ Resolution order:
 
 1. **`sendmaxx icps get <slug>`** — the canonical source. The `content` field is the markdown ICP.
 2. **`sendmaxx icps list`** — if the user doesn't tell you which slug, list ICPs and ask them to pick one (or infer from context if only one is active).
-3. Local cache files at `./.sendmaxx/icps/<slug>.md` or `~/.sendmaxx/icps/<slug>.md` — **only** as a fallback if the server is unreachable. Treat these as possibly stale.
+3. `~/.sendmaxx/icps/<slug>.md` — the CLI's synced local copy. Every `sendmaxx icps` command refreshes it. Read it directly only if the server is unreachable, and in that case treat it as current only up to the last successful sync.
 4. CLAUDE.md of the current project, if it describes an ICP and the user confirms.
 5. Ask the user.
 
