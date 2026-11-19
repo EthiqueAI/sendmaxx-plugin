@@ -1,6 +1,6 @@
 {
   "name": "sendmaxx",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Skills for SendMaxx outbound sales — ICP analysis, contact discovery, campaign drafting, call briefs, post-call processing.",
   "homepage": "https://github.com/EthiqueAI/sendmaxx-plugin",
   "repository": "https://github.com/EthiqueAI/sendmaxx-plugin",

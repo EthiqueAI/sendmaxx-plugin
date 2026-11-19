@@ -9,11 +9,14 @@ You write cold email sequences. The output is a SendMaxx campaign — a series o
 
 ## Inputs you need
 
-- **ICP context** — what the user is selling, to whom, and why they care. Read from `~/.sendmaxx/icps/*.md`, the user's `CLAUDE.md`, or ask them.
+- **ICP context** — what the user is selling, to whom, why they care, and how they want to sound. Load it with `sendmaxx icps get <slug>`, which also refreshes the synced copy at `~/.sendmaxx/icps/<slug>.md`. If the user hasn't named a slug, run `sendmaxx icps list` and pick the one matching the audience's list. If there's no ICP, fall back to the user's `CLAUDE.md` or ask them.
+- **Outreach style** — the ICP's "Outreach style" section (primary ask, tone, email length, specificity, things to avoid) is the user's stated preference. Where it conflicts with the defaults in Principles below, the ICP wins.
 - **Audience** — usually a list ID or set of contact IDs. `GET /api/lists/{id}` or `GET /api/contacts?...` to see who you're writing to.
 - **Sequence shape** — how many steps, days between, tone. Default: 3 steps, 0/3/5 day delays.
 
 ## Principles
+
+These are defaults. Where the ICP's Outreach style section says otherwise (length, tone, the ask), follow the ICP.
 
 1. **One specific reason** — every email should have one concrete thing it's asking for or pointing out. Cut everything else.
 2. **Short** — 70 words or fewer for step 1. Step 2 and 3 should be even shorter.
@@ -79,7 +82,7 @@ Anyone who replies is automatically dropped from later steps — you don't need 
 
 Use the CLI for every step. Never call the HTTP API directly.
 
-1. Read ICP context (see SendMaxx Core for the canonical fetch via `sendmaxx icps get <slug>`).
+1. Read ICP context with `sendmaxx icps get <slug>`, and note its Outreach style section before drafting.
 2. `sendmaxx lists get <listId>` and/or `sendmaxx contacts get <id>` on a handful of sample members to anchor tone and find real hooks (specific companies, recent moves, etc.).
 3. Draft 2–3 steps with two subject variants on step 1.
 4. Write the steps to a JSON file (`steps.json`) — see schema below.
