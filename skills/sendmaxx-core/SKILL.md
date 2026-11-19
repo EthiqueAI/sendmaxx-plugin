@@ -135,8 +135,10 @@ SendMaxx is a Next.js app backed by SQLite (Turso). It owns the schema, scheduli
 
 - **draft** — editable; nothing is being sent. You create campaigns in this state.
 - **active** — scheduler picks up due enrollments and sends.
-- **paused** — scheduler skips this campaign. Existing enrollments keep their progress.
-- **completed** — auto-set when every enrollment reaches a terminal status.
+- **paused** — nothing is sent for this campaign, including emails already due. Recipients keep their place and carry on from it after `resume`.
+- **completed** — auto-set when every enrollment is completed, replied, bounced or unsubscribed.
+
+Each recipient is `pending` until a launch starts them, then `in_progress`, then finished (`completed`, `replied`, `bounced`, `unsubscribed`). **Launch only ever starts `pending` recipients**: it never re-sends to anyone who already started or finished. Separately, the scheduler never emails a contact whose stage is `bounced` or `unsubscribed` (in any campaign), nor anyone who has replied to that campaign.
 
 **Launching, pausing, resuming, and audience management ARE in the CLI** — see the Campaigns section below. Do not launch a campaign without explicit user approval; create the draft, summarize what you built, and wait for the user to say go.
 
@@ -346,11 +348,18 @@ Single round-trip, deduped by email server-side. Returns `{ imported, skipped, e
 | `state` | | US 2-letter code is conventional but not enforced. |
 | `county` | | |
 | `notes` | | Free text. |
+| `confidenceScore` | | Whole number 0–10. |
+| `confidenceTier` | | `low`, `medium` or `high`. Derived from the score when omitted (7+ high, 4–6 medium, 0–3 low). |
+| `confidenceReasoning` | | Why the score. The user reads this next to the score in the web app, so write it for them. |
+| `sources` | | Provider names or URLs, as a JSON array (or comma-separated text in a CSV cell). |
+| `enrichedAt` | | ISO date or unix ms. Defaults to now when `sources` is given. |
+
+Existing emails are **skipped, never overwritten**; `skipped` counts them. A row whose score fields don't validate (score 11, tier "great", enrichedAt in seconds) is skipped and named in `errors`. Fix and re-import those rows.
 
 **CSV format:**
 - First row is the header. Cells may be quoted; embedded commas and `""`-escaped quotes are handled.
 - Common header variants are auto-mapped: `Email Address`, `email_address`, `E-mail` → `email`; `First Name`, `first_name`, `Given Name` → `firstName`; `Job Title`, `Role`, `Position` → `title`; `Organization`, `Company Name`, `Org` → `company`; `Phone Number`, `Mobile`, `Tel` → `phone`; etc.
-- If a column doesn't auto-map, pass `--mapping '{"<exact header text>":"<canonical field>"}'`. The canonical field must be one of the nine fields above.
+- If a column doesn't auto-map, pass `--mapping '{"<exact header text>":"<canonical field>"}'`. The canonical field must be one of the fields above.
 
 **JSON format:** either a top-level array `[{...}, {...}]` or `{"rows":[{...}, {...}]}`. Use the canonical field names directly.
 
@@ -360,7 +369,10 @@ Single round-trip, deduped by email server-side. Returns `{ imported, skipped, e
 
 ```bash
 sendmaxx contacts update <id> --json '{"title":"VP Sales","phone":"+1..."}'
+sendmaxx contacts update <id> --json '{"confidenceScore":8,"confidenceReasoning":"Series B fintech; VP Compliance owns the budget."}'
 ```
+
+Only the fields you send change. The score fields (`confidenceScore`, `confidenceTier`, `confidenceReasoning`, `sources`, `enrichedAt`) are validated the same way as on import, and an invalid one fails the whole update with a 400 that names the field. Send `null` to clear one; clearing the score clears its tier. Avoid apostrophes inside a single-quoted `--json` string, or the shell will cut it short.
 
 Manual fields are sacred. When re-enriching, check the existing value first and only patch empty fields, or confirm with the user.
 
@@ -584,7 +596,13 @@ sendmaxx campaigns pause  <id>
 sendmaxx campaigns resume <id>
 ```
 
-Launch requires at least one step and a non-empty audience — the server will 400 otherwise. Returns `{ ok: true, enrolled: <n> }`.
+Returns `{ ok: true, started, audience }`: `started` is how many recipients this launch started.
+
+- Launch requires at least one step and a non-empty audience (400 otherwise).
+- Launching a running or finished campaign again is safe: it starts only contacts added since (`audience add`, then `launch`), and is refused with 409 when there are none.
+- Launch is refused (409) while the campaign is **paused** — use `resume` — or **archived** — use `restore` first.
+- `pause` stops sending immediately; pausing a paused campaign is a no-op, and pausing a draft or finished one is refused (409).
+- `resume` is creator-only, like launch. It's refused for drafts (launch instead), finished and archived campaigns. Anything that fell due during the pause goes out on the next ticks, within the send window and daily cap.
 
 **Authorization rule:** the user must explicitly approve launching *this campaign*. A blanket "go" from earlier in the conversation does not extend to a new campaign. Show the user the campaign summary (name, audience size, step count, first send time) and wait.
 
@@ -698,9 +716,8 @@ the send-hour window.
 
 A `campaign_override` is delivered by the campaign itself, at the step you targeted —
 `send` just approves it. An override still in `draft` when its step comes due is
-skipped: the template sends and the override is marked `canceled`. Note also that
-re-launching an active campaign resets `nextSendAt` for the *whole* audience, so an
-override on a later step can fire earlier than you'd expect.
+skipped: the template sends and the override is marked `canceled`. Launching again
+never moves recipients who already started, so an override keeps its step's timing.
 
 ---
 

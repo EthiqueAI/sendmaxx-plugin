@@ -54,7 +54,7 @@ The schema doesn't have a dedicated `icpFitScore` column. Fit scoring lives on t
 
 - `confidenceScore` (0–10) — the fit score
 - `confidenceTier` — `high` (7+), `medium` (5–6), `low` (1–4)
-- `confidenceReasoning` — the *why*: which ICP signals matched, which didn't
+- `confidenceReasoning` — the *why*: which ICP signals matched, which didn't. The user reads it next to the score in the web app (the contact panel and the campaign's recipient list), so write one or two plain sentences they can check.
 
 ```bash
 sendmaxx contacts update <id> --json '{
