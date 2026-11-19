@@ -68,7 +68,7 @@ Most have free tiers. Apollo and Hunter are usually enough to start.
    - Whitepages for phone (only if dialing)
 4. **Cross-reference** — pick the best value per field; flag disagreement in `confidenceReasoning`
 5. **Score confidence** (0-10) based on agreement (see scoring below)
-6. **Write to SendMaxx** — `sendmaxx contacts import --file rows.json --format json` (single round-trip, deduped by email). Use this even for batches of 10+; the per-row `contacts add --file` path is for already-canonical small imports.
+6. **Write to SendMaxx** — `sendmaxx contacts import --file rows.json --format json` (single round-trip, deduped by email). Use this even for batches of 10+; the per-row `contacts add --file` path is for already-canonical small imports. Put the score on each row (`confidenceScore`, `confidenceTier`, `confidenceReasoning`, `sources`); `enrichedAt` defaults to the import time. A row with an invalid score is skipped and named in `errors`, so check `errors` and re-import the fixed rows.
 7. **Optionally add to a list** — `sendmaxx lists add <listId> --contacts id1,id2,...`
 
 ## Confidence scoring (0–10)
@@ -101,10 +101,10 @@ Tier mapping: 6+ = `high`, 3–5 = `medium`, 0–2 = `low`.
 
 ## Sources field
 
-Always populate the `sources` JSON array with which providers contributed:
+Always populate the `sources` JSON array with which providers contributed. A source can also be the URL of the page you used (a LinkedIn profile, a company team page); the web app shows URLs as links, so the user can check your work.
 
 ```json
-"sources": ["apollo", "hunter", "proxycurl"]
+"sources": ["apollo", "hunter", "https://www.linkedin.com/in/ada-lovelace"]
 ```
 
 ## Re-enrichment
